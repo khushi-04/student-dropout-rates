@@ -1,0 +1,323 @@
+---
+title: "STAT_167_Project"
+output:
+  pdf_document: default
+  html_notebook: default
+editor_options:
+  chunk_output_type: inline
+---
+
+## Libraries
+```{r}
+library(tidyverse) ## For 'dplyr' & 'ggplot'
+library(gridExtra)
+```
+
+
+```{r}
+df <- read.csv("Cleaner_Data.csv", header = TRUE, sep = ',')
+```
+
+## Data Cleaning and Manipulation
+
+```{r}
+## Rename Variables
+rn_df <- df %>%
+  rename(Age = Age.at.enrollment,
+         Mart.Stat = Marital.status,
+         Mom.Occp = Mother.Occupation,
+         Mom.Ed = Mother.Quals,
+         Dad.Occp = Father.Occupation,
+         Dad.Ed = Father.Quals,
+         Smstr1.GPA = Curricular.units.1st.sem..grade.,
+         Smstr2.GPA = Curricular.units.2nd.sem..grade.)
+
+## Filter Data to a new data frame
+fltr_df <- rn_df |>
+  select(Target, Age, 
+         Smstr1.GPA, Smstr2.GPA,
+         Gender, Mart.Stat, 
+         Nationality, 
+         Mom.Ed, Mom.Occp,
+         Dad.Ed, Dad.Occp,
+         Target, Course,
+         Admission.Grade,
+         Scholarship,) |>
+  arrange(Age) 
+#fltr_df
+```
+
+```{r}
+## Replace semester GPA scale from(0,20) to (0,5)
+fltr_df$Smstr1.GPA <- round( (fltr_df$Smstr1.GPA/20)*5, digits = 2)
+fltr_df$Smstr2.GPA <- round( (fltr_df$Smstr2.GPA/20)*5, digits = 2)
+
+## Assign each student to an avg grade category that reflects their GPA
+## UCI's Grading(http://www.reg.uci.edu/services/transcripts/notations.html)
+## UCR's Grading()
+asgn_Grade <- function(gpa){
+  brackets = c("na")
+  for(i in 1:length(gpa)){
+    if(0<= gpa[i] & gpa[i] <= 0.69){
+      brackets[i] <- "F"
+    }else if(0.7<= gpa[i] & gpa[i] <=0.99){
+      brackets[i] <- "D-"
+    }else if(1<= gpa[i] & gpa[i] <=1.29){
+      brackets[i] <- "D"
+    }else if(1.3<= gpa[i] & gpa[i] <=1.69){
+      brackets[i] <- "D+"
+    }else if(1.7<= gpa[i] & gpa[i] <=1.99){
+      brackets[i] <- "C-"
+    }else if(2.0<= gpa[i] & gpa[i] <=2.29){
+      brackets[i] <- "C"
+    }else if(2.3<= gpa[i] & gpa[i] <=2.69){
+      brackets[i] <- "C+"
+    }else if(2.7<= gpa[i] & gpa[i] <=2.99){
+      brackets[i] <- "B-"
+    }else if(3.0<= gpa[i] & gpa[i] <=3.29){
+      brackets[i] <- "B"
+    }else if(3.3<= gpa[i] & gpa[i]<=3.69){
+      brackets[i] <- "B+"
+    }else if(3.7<= gpa[i] & gpa[i] <=3.99){
+      brackets[i] <- "A-"
+    }else if(4.0<=gpa[i]){
+      brackets[i] <- "A"
+    }
+  }
+  return(brackets)
+}
+
+## Assign each student to an age group
+asgn_AgeGrp <- function(age){
+  brackets <- c("na")
+  for(i in 1:length(age)){
+    if(17<=age[i] & age[i]<=19){
+      brackets[i] <- "A_yng_adults"
+    }else if(20<=age[i] & age[i]<=24){
+      brackets[i] <- "B_early_20s"
+    }else if(25<=age[i] & age[i]<=29){
+      brackets[i] <- "C_late_20s"
+    }else if(30<=age[i] & age[i]<=34){
+      brackets[i] <- "D_early_30s"
+    }else if(35<=age[i] & age[i]<=39){
+      brackets[i] <- "E_late_30s"
+    }else if(40<=age[i] & age[i]<=44){
+      brackets[i] <- "F_early_40s"
+    }else if(45<=age[i] & age[i]<=49){
+      brackets[i] <- "G_late_40s"
+    }else if(50<=age[i] & age[i]<=54){
+      brackets[i] <- "H_early_50s"
+    }else if(55<=age[i] & age[i]<=59){
+      brackets[i] <- "I_late_50s"
+    }else if(60<=age[i] & age[i]<=64){
+      brackets[i] <- "J_early_60s"
+    }else if(65<=age[i] & age[i]<=69){
+      brackets[i] <- "K_late_60s"
+    }else if(70<=age[i]){
+      brackets[i] <- "L_over_70"
+    }
+  }
+  return(brackets)
+}
+fltr_df$Age_grp <- asgn_AgeGrp(fltr_df$Age)
+
+## Create new variable called GPA.ttl
+fltr_df <- fltr_df |>
+  mutate( GPA.Ttl = round( (Smstr1.GPA + Smstr2.GPA)/2, 2), .after = Smstr2.GPA )
+
+#fltr_df
+```
+
+
+## Of those that dropped, What's their GPA info?
+```{r, fig.height=5.5}
+dropouts <- filter(fltr_df, Target=="Dropout")
+
+## Graph of raw data. Too many peaks. Hard to interpret.
+plot_a1 <- ggplot(data = dropouts, mapping = aes(x = (GPA.Ttl))) +
+  geom_density() +
+  labs(x = "GPA")
+
+plot_a2 <- ggplot(data = dropouts, mapping = aes(x=(GPA.Ttl))) +
+  geom_bar() +
+  xlim(2,4) +
+  labs(x = "GPA")
+
+plot_a3 <- ggplot(data = fltr_df, mapping = aes(x = GPA.Ttl)) +
+  geom_boxplot() +
+  labs(x = "GPA")
+
+plot_a4 <- ggplot(data = fltr_df, mapping = aes(x = GPA.Ttl)) +
+  geom_boxplot() +
+  xlim(2,4) +
+  labs(x = "GPA")
+
+grid.arrange(plot_a1, plot_a2, plot_a3, plot_a4, ncol = 2)
+## Note the number of Rows being removed.
+```
+
+```{r, fig.height=5.5}
+## Graph of (data)^2
+plot_a5 <- ggplot(data = dropouts, mapping = aes(x = (GPA.Ttl)^2)) +
+  geom_density()
+## Not any better than previous graph of raw data
+
+plot_a6 <- ggplot(data = dropouts, mapping = aes(x=(GPA.Ttl))) +
+  geom_bar() +
+  labs(x = "GPA")
+
+plot_a7 <- ggplot(data = fltr_df, mapping = aes(x = (GPA.Ttl)^2)) +
+  geom_boxplot() +
+  labs(x = "GPA")
+
+plot_a8 <- ggplot(data = fltr_df, mapping = aes(x = (GPA.Ttl)^2)) +
+  geom_boxplot() +
+  labs(x = "GPA")
+
+grid.arrange(plot_a5, plot_a6, plot_a7, plot_a8, ncol = 2)
+## Note the number of Rows being removed.
+```
+
+```{r, fig.height=5.5}
+## Graph of log(data).
+plot_a9 <-ggplot(data = dropouts, mapping = aes(x = log((GPA.Ttl)))) +
+  geom_density()
+## Few peaks, but still not quite good.
+
+plot_a10 <- ggplot(data = dropouts, mapping = aes(x=log(GPA.Ttl))) +
+  geom_bar()  +
+  labs(x = "GPA")
+
+plot_a11 <-ggplot(data = fltr_df, mapping = aes(x = log(GPA.Ttl))) +
+  geom_boxplot() +
+  xlim(0.75,1.5) +
+  labs(x = "GPA")
+
+plot_a12 <-ggplot(data = fltr_df, mapping = aes(x = log(GPA.Ttl))) +
+  geom_boxplot() +
+  labs(x = "GPA")
+
+grid.arrange(plot_a9, plot_a10, plot_a11, plot_a12, ncol = 2)
+## Note the number of Rows being removed.
+```
+
+**Interpretation From Boxplots** From the raw data boxplot and log boxplot, I see there are many outliers. Checking to see if a good portion of the dropout students' GPAs are between 2.5 and 4.0.
+
+```{r}
+## Investigating Outliers
+##summary(dropouts$GPA.Ttl)
+
+length(dropouts$GPA.Ttl) ## 1421 students
+length(dropouts$GPA.Ttl) - sum(dropouts$GPA.Ttl<2.5) ## (1421 - 751) = 670 students above 2.5
+
+## Dropouts Information
+# students_Drop_info <- fltr_df |>
+#   filter(Target=="Dropout") |>
+#   group_by(Gender) |>
+#   reframe(Total_Students = n(), 
+#           Avg_GPA = mean(GPA.Ttl), 
+#           Min_GPA = min(GPA.Ttl), 
+#           Sum_of_MinGPA = sum(GPA.Ttl==min(GPA.Ttl)),
+#           Max_GPA = max(GPA.Ttl),
+#           Sum_of_MaxGPA = sum(GPA.Ttl==max(GPA.Ttl)))
+# 
+# students_Drop_info
+```
+There are more dropout students with GPA below 2.5. I can't just remove them.
+
+## Let's look at students by their Grade to see who has the highest dropout rate
+
+```{r, fig.height=5.5}
+fltr_df$Grade <- asgn_Grade(fltr_df$GPA.Ttl)
+fltr_df$Grade
+fltr_df$Grade <- factor(fltr_df$Grade, levels = c("F","D-","D","D+","C-","C","C+","B-","B","B+","A-","A","A+"))
+
+plot_b1 <- ggplot(data = fltr_df, mapping = aes(x=Grade, fill = Target)) +
+  geom_bar() +
+  labs(x = "Grade")
+
+plot_b1
+
+```
+
+```{r}
+fltr_df$Target <- factor(fltr_df$Target)
+```
+```{r}
+# building a multiple linear regression model with binary discrete and continuous variables with the average total GPA as the response variable
+
+
+
+# Function for backward selection using adjusted R^2
+
+
+# using a backwards selection technique and removing variables based on which combination of variables result in a higher adjusted R^2 value
+
+mlr_model_backwards <- lm(GPA.Ttl ~ Age + Gender + Mom.Ed + Mom.Occp + Dad.Ed + Dad.Occp + Admission.Grade + Scholarship, fltr_df)
+summary(mlr_model_backwards)
+
+#remove the variable with the highest p-value approach
+mlr_model_backwards <- lm(GPA.Ttl ~ Age + Gender + Mom.Ed + Mom.Occp + Dad.Ed + Admission.Grade + Scholarship, fltr_df)
+mlr_model_backwards <- lm(GPA.Ttl ~ Age + Gender + Mom.Ed + Mom.Occp + Admission.Grade + Scholarship, fltr_df)
+mlr_model_backwards <- lm(GPA.Ttl ~ Age + Gender + Mom.Ed + Admission.Grade + Scholarship, fltr_df)
+mlr_model_backwards <- lm(GPA.Ttl ~ Age + Gender + Admission.Grade + Scholarship, fltr_df)
+
+#removing any more variables results in a lower adjusted R^2 value so we keep this current model
+summary(mlr_model_backwards)
+
+
+# repeat this process using forwards selection by starting with an empty model and chosing the variables that increase the adjusted r^2 value the most
+
+# adjusted R^2 values for each variable
+
+mlr_model_forwards <- lm(GPA.Ttl ~ Age, fltr_df) #0.02954
+
+mlr_model_forwards <- lm(GPA.Ttl ~ Gender, fltr_df) #0.04093
+
+mlr_model_forwards <- lm(GPA.Ttl ~ Mom.Ed, fltr_df) # 0.001004
+
+mlr_model_forwards <- lm(GPA.Ttl ~ Mom.Occp, fltr_df) #0.0001845
+
+mlr_model_forwards <- lm(GPA.Ttl ~ Dad.Ed, fltr_df) #0.0001567
+
+mlr_model_forwards <- lm(GPA.Ttl ~ Dad.Occp, fltr_df) #-2.525e-05 
+
+mlr_model_forwards <- lm(GPA.Ttl ~ Admission.Grade, fltr_df) #0.005764
+
+mlr_model_forwards <- lm(GPA.Ttl ~ Scholarship, fltr_df) #0.03313
+
+# We select the variable with the largest adjusted R^2 values 
+# the next variable will be selected based on the largest adjusted R^2 value when added to the model
+
+```
+```{r}
+
+# Function for backward selection using adjusted R^2
+backwards_selection_p_value <- function(formula, data, alpha = 0.05) {
+  # Fit the full model
+  full_model <- lm(formula, data = data)
+  
+  # Get the p-values of the predictors
+  p_values <- summary(full_model)$coefficients[, 4]
+  
+  # Identify predictors to remove
+  predictors_to_remove <- which(p_values > alpha)
+  
+  # Remove predictors one by one
+  for(i in predictors_to_remove) {
+    temp_formula <- update(formula,. ~. - terms(formula)[i])
+    temp_model <- lm(temp_formula, data = data)
+  }
+  
+  # Return the final model
+  return(full_model)
+}
+
+mlr_model_backwards <- lm(GPA.Ttl ~ Age + Gender + Admission.Grade + Scholarship, fltr_df)
+summary(mlr_model_backwards)
+
+new_model <- backwards_selection_adjusted_R2(GPA.Ttl ~ Age + Gender + Mom.Ed + Mom.Occp + Dad.Ed + Dad.Occp + Admission.Grade + Scholarship, fltr_df)
+
+summary(new_model)
+```
+

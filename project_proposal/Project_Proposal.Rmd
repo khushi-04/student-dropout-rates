@@ -1,0 +1,184 @@
+---
+title: 'Group 6 Project Proposal'
+author: "Group 6"
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    toc: yes
+---
+
+***
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Packages
+
+```{r}
+# packages
+library(tidyverse)
+library(gridExtra)
+```
+
+# Import Data
+
+```{r}
+students_df <- read.csv("data.csv",  header = TRUE, sep = ";")
+```
+
+# Dataset Information
+
+Our dataset contains 37 variables, all describing information about students at the time of enrollment, such as academic path, demographics, and social-economic factors. Each instance represents a student and there are 4424 students in this dataset. 
+
+This dataset also contains information on the information of a student while they took a certain course, along with whether they dropped out of that course by the end. We will use all this information to explore our research questions. 
+
+## Data Cleaning
+
+The following code chunk renames column variables to legible names and copies some of the categorical variable columns to new columns with factored values.
+```{r}
+students_df <- students_df %>% 
+  rename(
+    Mother.Ed.Level = Mother.s.qualification,
+    Father.Ed.Level = Father.s.qualification,
+    Tuition.fees = Tuition.fees.up.to.date,
+    Attendance = Daytime.evening.attendance.,
+    Student.Ed.Level = Previous.qualification,
+    Previous.qualification.grade = Previous.qualification..grade.,
+    Mother.occupation = Mother.s.occupation,
+    Father.occupation = Father.s.occupation,
+    Nationality = Nacionality,
+    Age = Age.at.enrollment,
+    Student.Special.Needs = Educational.special.needs,
+    Smstr.1.Credited.Units = Curricular.units.1st.sem..credited.,
+    Smstr.1.Enrolled.Units = Curricular.units.1st.sem..enrolled.,
+    Smstr.1.Evaluated.Units = Curricular.units.1st.sem..evaluations., 
+    Smstr.1.Not.Evaluated.Units = Curricular.units.1st.sem..without.evaluations.,
+    Smstr.1.Approved.Units = Curricular.units.1st.sem..approved.,
+    Smstr.1.Grade.Avg = Curricular.units.1st.sem..grade.,
+    Smstr.2.Credited.Units = Curricular.units.2nd.sem..credited.,
+    Smstr.2.Enrolled.Units = Curricular.units.2nd.sem..enrolled.,
+    Smstr.2.Evaluated.Units = Curricular.units.2nd.sem..evaluations., 
+    Smstr.2.Not.Evaluated.Units = Curricular.units.2nd.sem..without.evaluations.,
+    Smstr.2.Approved.Units = Curricular.units.2nd.sem..approved.,
+    Smstr.2.Grade.Avg = Curricular.units.2nd.sem..grade.,
+    )
+#Note:
+# Once we finalize  our research questions, we can remove any variables 
+# that won't be useful to answer the questions
+```
+
+```{r}
+# Adding new columns
+students_df$Attendance.labeled <- factor(students_df$Attendance, 
+                                                         levels = c(1,0),
+                                                         labels = c("Daytime", "Evening"))
+
+students_df$Gender.labeled <- factor(students_df$Gender, levels = c(0, 1), 
+                                     labels = c("Female", "Male"))
+
+```
+
+# Exploratory Data Analysis
+
+```{r}
+dim(students_df)
+head(students_df, 3)
+```
+
+In order to make a linear model, we need to make sure to have numerical values for the target variable.
+
+```{r}
+students_df$Target.labeled <- factor(students_df$Target, 
+                                     levels = c("Dropout", "Graduate", "Enrolled"), 
+                                     labels = c(0, 1, 2))
+students_df$Target.labeled <- as.integer(students_df$Target.labeled)
+```
+
+Here are some initial graphs
+
+```{r}
+# Target vs Age Bar plot
+plot1 <- ggplot(data = students_df) +
+  geom_bar(mapping = aes(x = Target, fill = factor(Age)))
+
+# Target vs Gender Bar plot
+plot2 <- ggplot(data = students_df) +
+  geom_bar(mapping = aes(x = Target, fill = Gender.labeled))
+
+grid.arrange(plot1, plot2, nrow = 1)
+```
+
+
+```{r}
+options(scipen = 999)
+# Target vs Admission.Grade bar plot
+plot1 <- ggplot(data = students_df)+
+  geom_col(aes(x = Target, y = Admission.grade ), color = "lightblue")+
+  labs(title = "Target vs. Admission Grade", x = "Target Response", 
+       y = "Admission Grade")
+plot1 <- ggplot(students_df, aes(x=Admission.grade, fill=Target)) +
+  geom_histogram(binwidth=5, alpha=0.5, position="identity") +
+  labs(title="Distribution of Admission Grades by Target", x="Admission Grades", y="Count") +
+  theme_minimal()
+
+# Distribution of Target by Gender Jitterplot
+plot2 <- ggplot(data = students_df)+
+  geom_jitter(aes(x = Target, y = Gender.labeled))+
+  labs(title = "Target vs. Gender", x = "Target Response", y = "Gender")
+
+# Age vs Target violin plot
+plot3 <- ggplot(data = students_df, aes(x = Target, y = Age))+
+  geom_violin()+
+  labs(title = "Age at Enrollment vs. Target", x = "Age at Enrollment", 
+       y = "Target Response")
+
+# Distribution of Age Boxplot
+plot4 <- ggplot(data = students_df, aes(x = Age))+
+  geom_boxplot(fill = "lightgreen")+
+  labs(title = "Distribution of Age During Course Enrollment", x = "Age at Enrollment")+
+  theme_minimal()+
+  theme_classic()+
+  theme(plot.background = element_rect(fill = "lightgrey"))
+
+
+grid.arrange(plot1, plot2, plot3, plot4, nrow = 2)
+
+plot1
+
+
+paste("The (Target vs. Gender) Correlation Coefficient: ", 
+      cor(students_df$Gender, students_df$Target.labeled))
+
+paste("The (Target vs. Student Courses) Correlation Coefficient: ", 
+      cor(x = students_df$Target.labeled, y = students_df$Course))
+
+```
+
+# Our Research Questions
+
+From observing the data, we would like to aim the overall objective to see what is the main reason a student drops out of college. This objective expands to the following questions:\
+1. What are the biggest reason(s) that cause a student to drop out of college?\
+2. Does a student's parents' occupation have any influence to a student's decision to drop out of college?\
+3. Which Major has the most students dropping out of college?\
+4. Which Major has the highest number of students with best academic performance?\
+5. Of the students who dropped out of college, what was their grade avg compared to those who did not drop out of college. Is there a relation between student's low grade avg and dropping out of college?\
+6. Is there a relation between the unit of enrollment and the dropout rate?\
+7. Do student academic qualifications have a relation to their academic performance?\
+8. Do males or females have a higher drop out rate? What could this possibly relate to?\
+9. Is there a relation between scholarship holder students and their academic performance?\
+10. Does student performance get better or worst with change in age?\
+
+
+# Our Plans With The Data
+
+Based on our observations of the data and the simple initial EDA, we plan to further expand our analysis with more plots, graphs, and other tools to help answer our questions. We'll attempt to find patterns in the data. We'll observe the relations between different variables and infer our findings. If we see something that sparks a new question, we will include it to our research questions. Lastly, we'll model our data into a prediction to help us answer our main question.
+
+# Alternative Strategies / Backup Plans
+1. Statistical Analysis such as t test
+- We can use t-test to see if there is a significant difference in the mean academic performance between male and female students. The variable Smstr.1.Grade.Avg can be used.
+- We can use chi-square test to compare two categorical variables to see if they are related to each other. Variables such as gender, international, and scholarship.holder can be compared.
+2. Predictive Modeling
+- We can use models such as logistic regression model to predict dropout rates or academic performances using variables such as Daytime Attendance or marital status.
+- We can analyze tuition and GDP

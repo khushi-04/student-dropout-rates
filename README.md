@@ -2,6 +2,7 @@
 We explored a UCI database using exploratory data analysis (EDA), supervised machine learning, and unsupervised machine learning techniques. This project uses the 4.3.3 version of R-Studio. 
 
 ## UCI Database:
+https://archive.ics.uci.edu/dataset/697/predict+students+dropout+and+academic+success
 
 ## Libraries used: 
 * tidyverse

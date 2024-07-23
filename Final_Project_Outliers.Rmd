@@ -1,0 +1,922 @@
+---
+title: "Group Outliers: Exploring Causes Behind Student Dropout Rates"
+author: "Khushi Chaudhari, Gabriel Vasquez, Vincent Tang, Nicole Carter, Tiffany Tang"
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    toc: yes
+editor_options:
+  chunk_output_type: inline
+  pdf_document:
+    toc: yes
+  html_document:
+    toc: yes
+---
+
+## Libraries
+
+Here are all of the libraries we used throughout the project. 
+
+```{r, message = FALSE,}
+# install.packages("car")
+# install.packages("caret")
+# install.packages("randomForest")
+# install.packages("ROCR")
+library(tidyverse)
+library(gridExtra)
+library(car)
+library(MASS)
+library(caret)
+library(randomForest)
+library(ROCR)
+library(ggplot2)
+library(viridis)
+```
+
+# Project Description
+
+The dataset was downloaded from this link:
+
+https://archive.ics.uci.edu/dataset/697/predict+students+dropout+and+academic+success
+
+```{r}
+df <- read.csv("all_data.csv", header = TRUE, sep = ';')
+```
+
+Our dataset contains 37 variables, all describing information about students at the time of enrollment, such as academic path, demographics, and social-economic factors. Each instance represents a student and there are 4424 students in this dataset. Our response variable that we will use for a majority of our project is the "Target" variable that describes each student's status at the time of the survey. This is a categorical variable that contains three categories: enrolled, dropout, graduate. 
+
+This dataset also contains information on a student while they took a certain course. We will use all this information to explore our research questions. 
+
+## Research Questions
+
+* What are the biggest reason(s) that cause a student to drop out of college?
+* Of the students who dropped out of college, what was their grade avg compared to those who did not drop out of college?
+* Is there a relation between student's low grade avg and dropping out of college?
+* Do student academic qualifications have a relation to their academic performance?
+* Do males or females have a higher drop out rate? What could this possibly relate to?
+* Is there a relation between scholarship holder students and their academic performance?
+* Does student performance get better or worst with change in age?
+
+## Data Cleaning and Manipulation
+```{r}
+## Rename Variables
+rn_df <- df %>%
+  rename(Age = Age.at.enrollment,
+         Mart.Stat = Marital.status,
+         Mom.Occp = Mother.s.occupation,
+         Mom.Ed = Mother.s.qualification,
+         Dad.Occp = Father.s.occupation,
+         Dad.Ed = Father.s.qualification,
+         Smstr1.GPA = Curricular.units.1st.sem..grade.,
+         Smstr2.GPA = Curricular.units.2nd.sem..grade., 
+         Nationality = Nacionality, 
+         Scholarship = Scholarship.holder,
+         Admission.Grade = Admission.grade,
+         Attendance = Daytime.evening.attendance.)
+
+## Filter Data to a new data frame. These are the variables we're working with for this project.
+fltr_df <- rn_df |>
+   dplyr::select(Target, Age, 
+         Smstr1.GPA, Smstr2.GPA,
+         Gender, Mart.Stat, 
+         Nationality, 
+         Mom.Ed, Mom.Occp,
+         Dad.Ed, Dad.Occp, 
+         Course,
+         Admission.Grade,
+         Scholarship,
+         Attendance) |>
+  arrange(Age)  
+head(fltr_df)
+```
+Creating a new data set, filtering and adding new variables. Converting some numerical variables into categorical variables with new names. Some changes include: Factoring attendance, gender, scholarship. Changing GPA scale from 0-20 to 0-5. Creating a new average gpa category that averages both semesters. Creating a categorical version that holds the letter grades. Create an age group variable. Updating occupation variables. 
+
+```{r, echo = FALSE}
+fltr_df <- fltr_df |>
+  filter(Age<35)
+
+## Factor Attendance values
+fltr_df$Attendance <- factor(fltr_df$Attendance, levels = c(1,0), labels = c("Daytime", "Evening"))
+
+## Factor Gender values
+fltr_df$Gender <- factor(fltr_df$Gender, levels = c(0, 1), labels = c("Female", "Male"))
+
+fltr_df$Nationality <- factor(fltr_df$Nationality,
+  levels = c(1,2,6,11,13,14,17,21,22,24,25,26,
+             32,41,62,100,101,103,105,108,109),
+  labels = c("pt","gm","sp","it","du","eng","lit",
+             "ang","cv","gui","mz","sm","tk","br",
+             "rom","mld","mx","ukn","rus","cub","col"))
+
+unique(fltr_df$Nationality)
+
+## Factor Scholarship values
+fltr_df$Scholarship <- factor(fltr_df$Scholarship, levels = c(1,0), labels = c("Yes", "No"))
+
+## Replace semester GPA scale from(0,20) to (0,5)
+fltr_df$Smstr1.GPA <- round( (fltr_df$Smstr1.GPA/20)*5, digits = 2)
+fltr_df$Smstr2.GPA <- round( (fltr_df$Smstr2.GPA/20)*5, digits = 2)
+
+## Assign each student to an avg grade category that reflects their GPA
+## UCI's Grading(http://www.reg.uci.edu/services/transcripts/notations.html)
+asgn_Grade <- function(gpa){
+  brackets = c("na")
+  for(i in 1:length(gpa)){
+    if(0<=gpa[i] & gpa[i] <=0.69){
+      brackets[i] <- "F"
+    }else if(0.7<= gpa[i] & gpa[i] <=0.99){
+      brackets[i] <- "D-"
+    }else if(1<= gpa[i] & gpa[i] <=1.29){
+      brackets[i] <- "D"
+    }else if(1.3<= gpa[i] & gpa[i] <=1.69){
+      brackets[i] <- "D+"
+    }else if(1.7<= gpa[i] & gpa[i] <=1.99){
+      brackets[i] <- "C-"
+    }else if(2.0<= gpa[i] & gpa[i] <=2.29){
+      brackets[i] <- "C"
+    }else if(2.3<= gpa[i] & gpa[i] <=2.69){
+      brackets[i] <- "C+"
+    }else if(2.7<= gpa[i] & gpa[i] <=2.99){
+      brackets[i] <- "B-"
+    }else if(3.0<= gpa[i] & gpa[i] <=3.29){
+      brackets[i] <- "B"
+    }else if(3.3<= gpa[i] & gpa[i]<=3.69){
+      brackets[i] <- "B+"
+    }else if(3.7<= gpa[i] & gpa[i] <=3.99){
+      brackets[i] <- "A-"
+    }else if(4.0<=gpa[i]){
+      brackets[i] <- "A"
+    }
+  }
+  return(brackets)
+}
+
+## Assign each student to an age group
+asgn_AgeGrp <- function(age){
+  brackets <- c("na")
+  for(i in 1:length(age)){
+    if(17<=age[i] & age[i]<=19){
+      brackets[i] <- "1"
+    }else if(20<=age[i] & age[i]<=23){
+      brackets[i] <- "2"
+    }else if(24<=age[i] & age[i]<=26){
+      brackets[i] <- "3"
+    }else if(27<=age[i] & age[i]<=29){
+      brackets[i] <- "4"
+    }else if(30<=age[i]){
+      brackets[i] <- "5"
+    }
+  }
+  return(brackets)
+}
+
+fltr_df$Age.Group <- asgn_AgeGrp(fltr_df$Age)
+fltr_df$Age.Group <- factor(fltr_df$Age.Group, 
+                            levels = c(1,2,3,4,5),
+                            labels = c("Young Adults", "Early 20s", "Mid 20s", "Late 20s", "30 +over"))
+
+fltr_df$Age.Group <- asgn_AgeGrp(fltr_df$Age)
+
+replace_Occp <- function(data){
+  occp <- c()
+  for(i in 1:length(data)){
+    if(data[i]==0){
+      occp[i] <- 0
+    }else if(data[i] == 1){
+      occp[i] <- 1
+    }else if(data[i] == 2){
+      occp[i] <- 2
+    }else if(data[i] == 3){
+      occp[i] <- 3
+    }else if(data[i] == 4){
+      occp[i] <-  4
+    }else if(data[i] == 5){
+      occp[i] <-  5
+    }else if(data[i] == 6){
+      occp[i] <- 6
+    }else if(data[i] == 7){
+      occp[i] <- 7
+    }else if(data[i] == 8){
+      occp[i] <- 8
+    }else if(data[i] == 9){
+      occp[i] <- 9
+    }else if(data[i] == 10){
+      occp[i] <-  10
+    }else if(data[i] == 90){
+      occp[i] <-  11
+    }else if(data[i] == 99){
+      occp[i] <- 12
+    }else if(data[i] == 101){
+      occp[i] <- 13
+    }else if(data[i] == 102){
+      occp[i] <- 14
+    }else if(data[i] == 103){
+      occp[i] <- 15
+    }else if(data[i] == 112){
+      occp[i] <- 16
+    }else if(data[i] == 114){
+      occp[i] <- 17
+    }else if(data[i] == 122){
+      occp[i] <- 18
+    }else if(data[i] == 123){
+      occp[i] <- 19
+    }else if(data[i] == 124){
+      occp[i] <- 20
+    }else if(data[i] == 125){
+      occp[i] <- 21
+    }else if(data[i] == 131){
+      occp[i] <- 22
+    }else if(data[i] == 132){
+      occp[i] <- 23
+    }else if(data[i] == 134){
+      occp[i] <- 24
+    }else if(data[i] == 135){
+      occp[i] <- 25
+    }else if(data[i] == 141){
+      occp[i] <- 26
+    }else if(data[i] == 143){
+      occp[i] <- 27
+    }else if(data[i] == 144){
+      occp[i] <- 28
+    }else if(data[i] == 151){
+      occp[i] <- 29
+    }else if(data[i] == 152){
+      occp[i] <- 30
+    }else if(data[i] == 153){
+      occp[i] <- 31
+    }else if(data[i] == 154){
+      occp[i] <- 32
+    }else if(data[i] == 161){
+      occp[i] <- 33
+    }else if(data[i] == 163){
+      occp[i] <- 34
+    }else if(data[i] == 171){
+      occp[i] <- 35
+    }else if(data[i] == 172){
+      occp[i] <- 36
+    }else if(data[i] == 173){
+      occp[i] <- 37
+    }else if(data[i] == 174){
+      occp[i] <- 38
+    }else if(data[i] == 175){
+      occp[i] <- 39
+    }else if(data[i] == 181){
+      occp[i] <- 40
+    }else if(data[i] == 181){
+      occp[i] <- 41
+    }else if(data[i] == 182){
+      occp[i] <- 42
+    }else if(data[i] == 183){
+      occp[i] <- 43
+    }else if(data[i] == 191){
+      occp[i] <- 44
+    }else if(data[i] == 192){
+      occp[i] <- 45
+    }else if(data[i] == 193){
+      occp[i] <- 46
+    }else if(data[i] == 194){
+      occp[i] <- 47
+    }else if(data[i] == 195){
+      occp[i] <- 48
+    }else{
+      print(paste("Error at assigning new numerical value at occp[",i,"]"))
+    }
+  }
+  return(occp)
+}
+fltr_df$Mom.Occp <- replace_Occp(fltr_df$Mom.Occp)  
+fltr_df$Dad.Occp <- replace_Occp(fltr_df$Dad.Occp)
+
+## Create a new variable called GPA
+fltr_df <- fltr_df |>
+  mutate( GPA = round((Smstr1.GPA + Smstr2.GPA)/2, 2), .after = Smstr2.GPA )
+
+## Add a Grade variable that categorizes each student's letter grade with their respected GPA
+fltr_df$Grade <- asgn_Grade(fltr_df$GPA)
+fltr_df$Grade <- factor(fltr_df$Grade, 
+                        levels = c("F","D-","D","D+","C-","C","C+","B-","B","B+","A-","A","A+"))
+```
+
+Write this new data file to a csv file.
+```{r, echo = FALSE}
+write.csv(fltr_df, "Data.csv")
+readTest <- read.csv("Data.csv",header = T, sep = ',')
+head(readTest)
+```
+
+**Important Variables we're using:**
+
+* Age - The student's Age during their enrollment. Many unique values. (ranges from 17 to 34)
+* Age.Group - The students are categorized by age groups. We're only including 4 age groups. Each group ranges 5 years except the first age group, "Young Adults".
+* Smstr1.GPA - The student's GPA from their 1st semester. Many unique values. (ranges from 0.0 to 4.72)
+* Smstr2.GPA - The student's GPA from their 2nd semester. Many unique values. (ranges from 0.0. to 4.64)
+* GPA - The student's overall GPA. This is calculated by averaging the student's semester 1 & 2 GPA. (ranges from 0.0 to 4.57)
+* Gender - Male or Female. (2 values)
+* Mart.Stat - The student's marital status. (6 values)
+* Nationality - The student's ethnicity or national origin. (21 values)
+* Mom.Ed - The student's mother's education level. (28 values)
+* Mom.Occp - The student's mother's occupation or job. (32 values)
+* Dad.Ed - The student's father's education level. (33 values)
+* Dad.Occp - The sutdent's father's occupation or job (44 values)
+* Scholarship - Yes the student is receiving a scholarship or No the student is not receiving a scholarship. (2 values)
+
+# Exploratory Data Analysis and Modeling
+
+We will try to use EDA and different types of modeling to answer our research questions. 
+
+## Target Variable
+
+```{r, echo = FALSE}
+stackbar <- ggplot(data = fltr_df) +
+  geom_bar(mapping = aes(x = "", fill = Target), width = 1) +
+  labs(x = NULL, y = NULL) +
+  ggtitle("Response Variable of Interest is Target")
+stackbar + coord_polar(theta = "y") +
+  theme(aspect.ratio = 1) 
+```
+
+### Proportion of Target values in the sample data
+```{r, echo = FALSE}
+fltr_df |> group_by(Target) |> summarize(Total = n(),
+                                         Ratio = round(Total/3983, 3))
+```
+
+## Scholarship Holders and Academic Performance
+
+Is there a relationship between scholarship holder students and their academic performance? 
+
+Based on the linear model and our graph, we see that GPA is a significant predictor for whether a student has a scholarship because it has a low p-value. Students with a higher GPA have a higher chance at receiving a scholarship. 
+```{r, echo = FALSE}
+ggplot(readTest)+
+  geom_bar(mapping = aes(x = Grade, fill = Scholarship), position = "dodge")
+
+readTest$Scholarship_Int <- ifelse(readTest$Scholarship == "Yes", 1, 0)
+head(readTest)
+
+schol_model <- glm(data = readTest, formula = Scholarship_Int ~ GPA)
+summary(schol_model)
+```
+
+## Previous Qualifications and Academic Performance
+
+In addition to getting information about the target variable, we also wanted to see if we can make any conclusions about other interesting factors. For this instance, we looked into if there is any relationship between a student's highest achieved level of education with their academic performance in undergraduate studies.
+
+In order to achieve this, first we created plots to evaluate if `previous qualification` has any visual effects on both 1st and 2nd semesters.
+
+```{r, echo = FALSE}
+ggplot(data = df, mapping = aes(x = Previous.qualification, y = Curricular.units.1st.sem..grade., color = Previous.qualification)) +
+  geom_count()
+
+ggplot(data = df, mapping = aes(x = Previous.qualification, y = Curricular.units.2nd.sem..grade., color = Previous.qualification)) +
+  geom_count()
+```
+
+Based on the above plots, we can make the conclusion that there are no clear patterns for qualification and semester GPA's. An interesting take-away from the plots is that those who had previous qualification of High School have the highest number of students, and their GPA is nearly 0. The largest number of students are represented by characteristics: Previous Qualification = High School, and GPA = 0 (Bottom left points). From this, we can deduce that most of the students in the data just finished high school and are entering undergraduate studies, meaning their undergraduate GPA hasn't been formulated yet.
+
+We can also run statistical analyses to quantitatively prove if a relationship exists.
+
+**Correlation Coefficients:**
+
+```{r, echo = FALSE}
+cor1 <- cor(df$Previous.qualification, df$Curricular.units.1st.sem..grade.)
+cor2 <- cor(df$Previous.qualification, df$Curricular.units.2nd.sem..grade.)
+
+paste(c("1st Semester vs. Previous Qualification Coefficient: "), cor1)
+paste(c("2nd Semester vs. Previous Qualification Coefficient: "), cor2)
+```
+
+We can identify very small correlation values comparing 1st and 2nd semester GPA to a student's previous qualification. In specific, 1st semester actually has a slight negative correlation to previous qualification, which was expected, since you would think that in the first semester, a student starting out in higher level education would have good grades, compared to those who have already started an undergraduate degree.
+
+**Linear Modeling:**
+
+In addition to correlation coefficients, we can conduct linear regression models to analyze the significance values.
+
+```{r}
+qual.model1 <- lm(Curricular.units.1st.sem..grade. ~ Previous.qualification, data = df)
+summary(qual.model1)
+```
+
+```{r}
+qual.model2 <- lm(Curricular.units.1st.sem..grade. ~ Previous.qualification, data = df)
+summary(qual.model2)
+```
+
+For both models, we can see that the p-values are extremely high, and both R-Squared values are significantly small, leading to the conclusion that there is no significant relationship between a student’s previous qualifications and their academic performance in both semesters.
+
+## Student Age and Grades vs Dropout Rates
+
+### Target by Age Bar Plot
+```{r, echo = FALSE}
+ggplot(data = fltr_df) +
+  geom_bar(aes(x = Age.Group, fill = Target), position = "dodge")+
+  scale_x_discrete(labels = c("1" = "Young Adults", "2" = "Early 20s", "3" = "Mid 20s", "4" = "Late 20s", "5" = "30s+over")) +
+  ggtitle("Target by Age Bar Plot")
+```
+
+### Dropout avg age vs Non-Dropout avg age Table
+```{r}
+stdnt_avg_age <- fltr_df |>
+  dplyr::select(Target, Age) |>
+  mutate(Student = ifelse(Target=="Dropout", "Dropout", "Non-Dropout")) |>
+  group_by(Student) |>
+  summarize(Total = n(), Avg_Age = mean(Age))
+
+table_slide3 <- data.frame(Student = stdnt_avg_age$Student, Avg_Age = stdnt_avg_age$Avg_Age)
+table_slide3
+```
+
+We will perform t-tests to analyze the relationship between age and Target, as well as a few other variables. First we create a new dataset with our variables of interest.  
+```{r, echo = FALSE}
+t_test_df <- rn_df %>%
+  dplyr::select(Target, Age, 
+                Smstr1.GPA, Smstr2.GPA,
+                Admission.Grade) %>%
+  filter(Target %in% c("Dropout", "Graduate"))
+t_test_df$Target <- factor(t_test_df$Target, levels = c("Graduate", "Dropout"))
+```
+
+### Age vs Target: t-test and ANOVA
+
+```{r}
+t_test_age <- t.test(Age ~ Target, data = t_test_df)
+print(t_test_age)
+anova_results <- aov(Age ~ Target, data = t_test_df)
+summary(anova_results)
+tukey_results <- TukeyHSD(anova_results)
+tukey_results
+
+dropout_df <- t_test_df %>%
+  mutate(AgeGroup = cut(Age, breaks = c(17, 20, 24, 27, 30, Inf), right = FALSE, 
+                        labels = c("(17-19)", "(20-23)", "(24-26)", "(27-29)", "(30 Over)")))
+anova_age_group <- aov(Age ~ AgeGroup, data = dropout_df)
+summary(anova_age_group)
+tukey_age_group <- TukeyHSD(anova_age_group)
+print(tukey_age_group)
+plot(tukey_age_group, las = 1)
+
+
+average_age_dropout <- mean(dropout_df$Age, na.rm = TRUE)
+average_age_dropout
+```
+There is a highly significant difference in the age of students who graduate and those who drop out. The average age of dropouts is significantly higher than that of graduates, suggesting that older students are more likely to drop out.
+
+Anova: Since Pvalue is less than 0.05, it indicates that there is a significant difference in the ages between the groups. We see a average age difference between dropouts and graduates is approximately 4.29 years. With a 95% CI,  the difference in means ranges from about 3.78 to 4.79 years.
+
+### Admission Grade vs Target
+
+```{r, echo = FALSE}
+# Admission Grade
+t_test_admission_grade <- t.test(Admission.Grade ~ Target, data = t_test_df)
+print(t_test_admission_grade)
+```
+There is a highly significant difference in admission grades between graduates and dropouts. Students who graduate have significantly higher admission grades compared to those who drop out, indicating that initial academic performance is a strong predictor of graduation.
+
+### Semester 1 and 2 GPA vs Target
+
+```{r, echo = FALSE}
+# Semester 1 GPA
+t_test_smstr1_gpa <- t.test(Smstr1.GPA ~ Target, data = t_test_df)
+print(t_test_smstr1_gpa)
+```
+There is a highly significant difference in first semester GPAs between graduates and dropouts. Students who graduate have significantly higher GPAs in their first semester than those who drop out, suggesting that early academic performance is crucial for student retention.
+
+```{r, echo = FALSE}
+# Semester 2 GPA
+t_test_smstr2_gpa <- t.test(Smstr2.GPA ~ Target, data = t_test_df)
+print(t_test_smstr2_gpa)
+```
+
+There is a highly significant difference in second semester GPAs between graduates and dropouts. Students who graduate have significantly higher GPAs in their second semester than those who drop out, reinforcing the importance of sustained academic performance for successful completion of studies.
+
+## Biggest Reasons Students Drop Out
+
+We will first create a new data set that we need specifically for our models. We will only consider dropouts and graduates for the sake of the model and the question we are trying to answer (what factors lead to a student dropping out). We want to analyze what predictors most influence our response variable, based on our research questions. 
+
+```{r}
+mod_df <- fltr_df %>%
+  filter(Target == "Dropout" | Target == "Graduate") %>%
+  dplyr::select(Target, Age, GPA, Gender, Mom.Ed, Mom.Occp, Dad.Ed, Dad.Occp, 
+                Course, Admission.Grade, Scholarship, Attendance)
+mod_df$Target <- ifelse(mod_df$Target == "Dropout", 1, 0)
+```
+
+Let's take a look at the distributions of each of our variables of interest against our Target variable. We are selecting about 9 out of our 18 variables to use in two models: logistic regression and random forest.
+
+We won't need to look at the distributions for variables we explored earlier. Based on our previous modeling and EDA, age and scholarship are significant variables that we want to include in our preliminary model. Based on previous t-tests, we know that admission grade and GPA are also significant variables in determining whether students drop out.
+
+Let's take a look at the rest of the variables we can use. We will use variables that either have two categories or they are numerical continuous/discrete. We will not use nominal discrete variables for classification modeling because we cannot order them in a reasonable format and would like to explore the variables that we can. 
+
+```{r}
+ggplot(mod_df) +
+  geom_count(aes(x = Target, y = Course), color = "pink")+
+  labs(title = "Target vs Course")+
+  scale_color_viridis_c(option = "plasma")+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        axis.title = element_text(face = "bold"),
+        legend.position = "right")
+
+print(paste("Correlation Coefficient between Target and Course: ", cor(mod_df$Course, as.numeric(mod_df$Target), method = "pearson")))
+```
+
+Based on this graph, we don't see any visible variation between the different courses on the target variable. The distributions looks very similar. Based on our correlation coefficient, there is very little correlation between the two variables because the number is close to 0. 
+
+```{r, echo = FALSE}
+ggplot(mod_df) +
+  geom_count(aes(x = Target, y = Gender), color = "lightblue")+ 
+  labs(title = "Target vs Gender")+
+  scale_color_viridis_c(option = "plasma")+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        axis.title = element_text(face = "bold"),
+        legend.position = "right")
+
+print(paste("Correlation Coefficient between Target and Gender: ", cor(as.numeric(mod_df$Gender), as.numeric(mod_df$Target), method = "pearson")))
+```
+
+Based on the graph, there seems to be some correlation between gender and Target. There are more females that are more likely to graduate. Based on the correlation coefficient, there is some positive correlation between the two variables. 
+
+```{r, echo = FALSE}
+ggplot(mod_df) + 
+  geom_count(aes(x = Target, y = Attendance), color = "lightgreen") +
+  labs(title = "Target vs Attendance")+
+  scale_color_viridis_c(option = "plasma")+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        axis.title = element_text(face = "bold"),
+        legend.position = "right")
+
+print(paste("Correlation Coefficient between Target and Attendance: ", cor(as.numeric(mod_df$Attendance), as.numeric(mod_df$Target), method = "pearson")))
+```
+
+Based on this graph, we don't see any visible variation between the attendance and target. The distributions looks very similar. Based on our correlation coefficient, there is very little correlation between the two variables because the number is close to 0. 
+
+```{r, echo = FALSE}
+mom.ed_plot <- ggplot(mod_df) +
+  geom_count(aes(x = Target, y = Mom.Ed), color = "orange")+
+  labs(title = "Target vs Mom Education")+
+  scale_color_viridis_c(option = "plasma")+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        axis.title = element_text(face = "bold"),
+        legend.position = "right")
+dad.ed_plot <- ggplot(mod_df) +
+  geom_count(aes(x = Target, y = Dad.Ed), color = "orange") +
+  labs(title = "Target vs Dad Education")+
+  scale_color_viridis_c(option = "plasma")+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        axis.title = element_text(face = "bold"),
+        legend.position = "right")
+grid.arrange(mom.ed_plot, dad.ed_plot, nrow = 2)
+
+print(paste("Correlation Coefficient between Target and Mom Education: ", cor(as.numeric(mod_df$Mom.Ed), as.numeric(mod_df$Target), method = "pearson")))
+print(paste("Correlation Coefficient between Target and Dad Education: ", cor(as.numeric(mod_df$Dad.Ed), as.numeric(mod_df$Target), method = "pearson")))
+
+```
+
+Based on both of these graphs, we don't see any visible variation between the parents' education and the target variable. The distributions looks very similar. Based on our correlation coefficients for both of these variables, there is very little correlation between the two variables because the numbers are close to 0. 
+
+```{r, echo = FALSE}
+mom.occ_plot <- ggplot(mod_df) +
+  geom_count(aes(x = Target, y = Mom.Occp), color = "purple") +
+  labs(title = "Target vs Mom Occupation")+
+  scale_color_viridis_c(option = "plasma")+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        axis.title = element_text(face = "bold"),
+        legend.position = "right")
+dad.occ_plot <- ggplot(mod_df) +
+  geom_count(aes(x = Target, y = Dad.Occp), color = "purple")+
+  labs(title = "Target vs Dad Occupation")+
+  scale_color_viridis_c(option = "plasma")+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        axis.title = element_text(face = "bold"),
+        legend.position = "right")
+
+grid.arrange(mom.occ_plot, dad.occ_plot, nrow = 2)
+print(paste("Correlation Coefficient between Target and Mom Occupation: ", cor(mod_df$Mom.Occp, as.numeric(mod_df$Target), method = "pearson")))
+print(paste("Correlation Coefficient between Target and Dad Occupation: ", cor(mod_df$Dad.Occp, as.numeric(mod_df$Target), method = "pearson")))
+
+
+```
+
+Based on these graphs, we can see that there are slightly different distributions between the variables for each of the parent's occupations. But the correlation coefficients are very low. For the sake of being safe because the distributions are visibly different, we will keep these variables in our models. 
+
+### Multiple Logistic Regression Model
+
+This preliminary model has all of our variables. It is not a very good model just based on the fact that some of our predictors have very high p-values. Such high p-values indicate that the variables are not statistically significant, so we want a model that only includes variables that are statistically significant. 
+```{r}
+mod_log <- glm(Target ~ Age + Gender + Mom.Occp + Dad.Occp 
+               + Admission.Grade + Scholarship + GPA, 
+               mod_df, family = binomial)
+summary(mod_log)
+```
+Let's try to select the best predictors using forwards and backwards selection. 
+
+### Backwards selection
+
+We will first use backwards elimination to remove predictors until the AIC value is stable and as low as possible. The AIC value is a measure for accuracy of the model, another metric used to measure how good the model is. We can use the step function to perform backwards elimination.
+
+```{r, echo = FALSE}
+backward_model <- step(mod_log, direction = "backward")
+summary(backward_model)
+```
+
+After performing the backwards elimination, we are left with a model with the following predictors: 
+
+Age, Gender, Mom.Occp, Admission.Grade, Scholarship, GPA
+
+### Forwards selection
+
+We will use forwards elimination to add predictors starting with an empty model until the AIC value is stable and as low as possible. We want to use a forwards selection method to confirm that we chose the most significant predictors from backwards selection. 
+
+```{r, echo = FALSE}
+empty_mod <- glm(Target ~ 1, data = mod_df, family = binomial)
+forward_model <- stepAIC(empty_mod, scope = list(lower = ~1, upper = ~Age 
+                                                 + Gender + Mom.Occp 
+                                                 + Dad.Occp + Admission.Grade 
+                                                 + Scholarship + GPA), 
+                         direction = "forward")
+summary(forward_model)
+```
+
+
+After performing the forwards elimination, we are left with a model with the following predictors: 
+
+Age, Gender, Mom.Occp, Admission.Grade, Scholarship, GPA
+
+These are the same predictors that we got from our backwards elimination. We will now perform diagnostics on this model to understand where it has flaws.
+
+### Final multiple logistic regression model
+
+Let's take a look at the predictors and their significance based on the model summary. 
+
+```{r}
+final_log_mod <- glm(Target ~ Age + Gender + Mom.Occp 
+               + Admission.Grade + Scholarship + GPA, 
+               mod_df, family = binomial)
+summary(final_log_mod)
+```
+
+Our AIC is 2751. Our p-values indicate that all of our selected predictors are significant because they are less than 0.05. The coefficients indicate:
+
+* A higher GPA gives a lower chance of a student dropping out.
+* A student without a scholarship gives a lower chance of a student dropping out. 
+* A higher age gives a higher chance of a student dropping out. 
+* A higher admission rate gives a lower chance of a student dropping out. 
+* Male students are more likely to drop out. 
+* Certain mother's occupations effect whether a student drops out. 
+
+### Model analysis and Diagnostics
+
+Let's look at some model diagnostics and analyze our final model.
+
+**AIC and BIC**
+
+Let's first look at the AIC and BIC scores of our model. 
+```{r, echo = FALSE}
+print(paste("AIC: ", AIC(final_log_mod)))
+print(paste("BIC:", BIC(final_log_mod)))
+```
+**Cook's plot**
+
+Let's take a look at Cook's plot. We want to take a look at how many outliers significantly impact our response variable and our model. 
+
+```{r, echo = FALSE}
+cooks_dist <- cooks.distance(final_log_mod)
+cook_df <- data.frame(Cooks_Distance = cooks_dist)
+
+cook_df <- cook_df %>% 
+  mutate(Observation = row_number())
+
+n <- nrow(mod_df)
+k <- length(coef(final_log_mod))
+threshold <- 4 / (n - k)
+
+influential_points <- ifelse(cooks_dist > threshold, 1, 0)
+count_influential <- sum(influential_points)
+
+print(paste("Proportion of points above the Cook's Distance: ", count_influential/n))
+
+ggplot(cook_df, aes(x = Observation, y = Cooks_Distance)) +
+  geom_point() +
+  geom_hline(yintercept = 4/(nrow(cook_df)-ncol(cook_df)), color = "red", 
+             linetype = "dashed") +
+  xlab("Observation") +
+  ylab("Cook's Distance") +
+  ggtitle("Cook's Distance Plot")
+
+```
+
+Based on this plot, there are quite a few points that are above our Cook's distance line. But, when we look at the proportion of the number of influential points to the total number of points, we can see that it's only about 0.067, or 6.7% of the total points. This means that our model does not actually have too many influential points and our model is reliable. 
+
+**Multicollinearity**
+
+We want to analyze multicollinearity because we want to make sure that none of our predictors are highly correlated with each other. If they are, we would need to either remove or combine them as their numbers give very similar information about the response variable.
+
+```{r, echo = FALSE}
+vif(final_log_mod)
+```
+
+After using VIF to print VIF values, we can see that all of our predictors are around 1-2, which are much less than 5. We can conclude that our predictors do not exhibit multicollinearity. 
+
+**Confusion Matrix**
+
+Next, we want to look at a confusion matrix using our model to look at some metrics to measure our model's performance. 
+
+```{r, echo = FALSE}
+set.seed(167)
+
+train_index <- createDataPartition(mod_df$Target, p = 0.8, list = FALSE)
+training_data <- mod_df[train_index, ]
+test_data <- mod_df[-train_index, ]
+
+glm_model_train <- glm(formula = Target ~ GPA + Scholarship + Age + 
+                         Admission.Grade + Gender + Mom.Occp, 
+                       data = training_data, family = "binomial")
+
+train_predictions <- ifelse(predict(glm_model_train, type = "response")>0.5, 1, 0)
+
+train_conf_matrix <- table(Actual = training_data$Target, Predicted = train_predictions)
+print("Confusion Matrix for Training Data:")
+print(train_conf_matrix)
+
+# Make predictions on the test data
+test_predictions <- ifelse(predict(glm_model_train, newdata = test_data, type = "response")>0.5, 1, 0)
+
+# Generate confusion matrix for test data
+test_conf_matrix <- table(Actual = test_data$Target, Predicted = test_predictions)
+print("Confusion Matrix for Test Data:")
+print(test_conf_matrix)
+
+TP <- test_conf_matrix[2, 2]
+TN <- test_conf_matrix[1, 1]
+FP <- test_conf_matrix[1, 2]
+FN <- test_conf_matrix[2, 1]
+
+accuracy <- (TP + TN) / sum(test_conf_matrix)
+precision <- TP / (TP + FP)
+recall <- TP / (TP + FN)
+specificity <- TN / (TN + FP)
+f1_score <- 2 * (precision * recall) / (precision + recall)
+
+cat("Accuracy: ", accuracy, "\n")
+cat("Precision: ", precision, "\n")
+cat("Recall: ", recall, "\n")
+cat("Specificity: ", specificity, "\n")
+cat("F1 Score: ", f1_score, "\n")
+```
+
+We have very high accuracy and precision. We do have a lower recall of 65% but our specificity is 92%. Overall, out model performs very well, which we can analyze using the F1 value. The F1 value balances our precision and recall and tells us whether the model balances both well. Based on our F1 value of 0.73, we conclude that our model has reasonably good precision and recall. 
+
+Comparing the training and test data matrices, we can clearly see that our model performs better on the test data than the training data. This is a good sign that our model is doing very well and has successfully learned the underlying patterns in the training data. This means that our model is likely to perform well when given unseen or new data. 
+
+**K-Fold Cross Validation**
+
+We want to analyze how well our model performs using k-fold cross validation. 
+
+```{r, echo = FALSE}
+set.seed(12345)
+
+log_mod_control <- trainControl(method = "cv", number = 10)
+mod_df$Target <- factor(mod_df$Target)
+
+log_mod_model <- train(
+  Target ~ Scholarship + Age + Gender + Admission.Grade + Mom.Occp + GPA,
+  data = mod_df, method = "glm", trControl = log_mod_control)
+
+print(log_mod_model)
+```
+
+A kappa value of approximately 0.57 suggests a moderate level of agreement beyond chance. Our classification model performs very well, achieving an accuracy of around 81% with a moderate level of agreement between predicted and actual classifications.
+
+### Random Forest Model
+
+Let's create a random forest model using all of our predictors next. We will use this model to compare it to our multiple logistic regression model. 
+
+```{r}
+set.seed(12345)
+rf_model <- randomForest(Target ~ Age + Gender + Mom.Occp + Dad.Occp + 
+                           Admission.Grade + Scholarship + GPA, data = mod_df)
+
+var_importance <- as.data.frame(importance(rf_model))
+selected_predictors <- rownames(var_importance)[var_importance$MeanDecreaseGini > 100]
+
+rf_model_selected <- randomForest(Target ~ ., 
+                                  data = subset(mod_df, select = c("Target", selected_predictors)))
+
+rf_model_selected
+plot(rf_model_selected)
+print(selected_predictors)
+```
+
+The first thing to note about this model is that after pruning the model using a very high value of importance, it chose the following variables: Age, Admission.Grade, GPA, and father's occupation. This is a smaller and different subset of variables. This could indicate that these subset of variables predicts the target more accurately. We will compare the analytics of this model to our first one to see which one is better. 
+
+We can see the error rate for all the variables and the highest error rate is low and the overall error rate of the model is 19.28%. This is a fairly low error rate and the model performs well for the most part. We will take a look at a confusion matrix using training and test data later to confirm how well the model performs. 
+
+### Model analysis and Diagnostics
+
+Let's now analyze this forest and compare it to our multiple logistic regression model.
+
+**ROC Curve**
+
+We will first look at the ROC for our random forest. 
+
+```{r, echo = FALSE}
+rf_probs <- predict(rf_model_selected, mod_df, type = "prob")[, "1"]
+rf_pred <- prediction(rf_probs, mod_df$Target)
+rf_perf <- performance(rf_pred, "tpr", "fpr")
+
+plot(rf_perf, main = "ROC Curve for Random Forest Model", col = "blue", lwd = 2)
+
+```
+
+The ROC curve allows us to visualize the sensitivity of our model. Looking at our curve, it is very close to the top left of the graph. This means that the sensitivity of the model is very high and it has a lower false positive rate. Overall, our model performs very well for our response variable. 
+
+**Confusion Matrix**
+
+Let's now create a confusion matrix and calculating the different metrics. 
+
+```{r, echo = FALSE}
+set.seed(12345)
+
+train_index <- createDataPartition(mod_df$Target, p = 0.8, list = FALSE)
+training_data <- mod_df[train_index, ]
+test_data <- mod_df[-train_index, ]
+
+rf_model_train <- randomForest(formula = Target ~ Age + Dad.Occp + Admission.Grade + GPA, data = training_data)
+
+train_predictions <- predict(rf_model_train, training_data, type = "class")
+
+# Generate confusion matrix for training data
+train_conf_matrix <- table(Actual = training_data$Target, Predicted = train_predictions)
+print("Confusion Matrix for Training Data:")
+print(train_conf_matrix)
+
+# Make predictions on the test data
+test_predictions <- predict(rf_model_train, test_data, type = "class")
+
+# Generate confusion matrix for test data
+test_conf_matrix <- table(Actual = test_data$Target, Predicted = test_predictions)
+print("Confusion Matrix for Test Data:")
+print(test_conf_matrix)
+
+TP <- test_conf_matrix[2, 2]
+TN <- test_conf_matrix[1, 1]
+FP <- test_conf_matrix[1, 2]
+FN <- test_conf_matrix[2, 1]
+
+accuracy <- (TP + TN) / sum(test_conf_matrix)
+precision <- TP / (TP + FP)
+recall <- TP / (TP + FN)
+specificity <- TN / (TN + FP)
+f1_score <- 2 * (precision * recall) / (precision + recall)
+
+cat("Accuracy: ", accuracy, "\n")
+cat("Precision: ", precision, "\n")
+cat("Recall: ", recall, "\n")
+cat("Specificity: ", specificity, "\n")
+cat("F1 Score: ", f1_score, "\n")
+```
+
+Similar to the multiple logistic regression model, our random forest model has high accuracy and precision. Furthermore, we have a lower recall of 64% but our specificity is 91%. Overall, out model performs very well, which we can analyze using the F1 value. Based on our F1 value of 0.71, we conclude that our model has reasonably good precision and recall. 
+
+An interesting note is that our F1 values for both models are very similar, which means that both model are quite reliable with a fairly high agreement between recall and precision. 
+
+Comparing the confusion matrices for the training and test data, we can see that the model performs far worse on the test data compared to the training data, which it performed nearly perfectly on. This is a sign that our model may be over fitting based on the data and may not be a very reliable model. This is because the model is likely not going to be able to perform well when given unseen data so it is not as reliable. 
+
+**K-Fold Cross Validation**
+
+Now, we will use k-fold-cross-validation to train our model and test it using the random forest models. 
+
+```{r, echo = FALSE}
+set.seed(123)
+# Define the control parameters for LOOCV
+kfold_control <- trainControl(method = "cv", number = 10)
+
+# Train the Random Forest model using LOOCV
+rf_model_loocv <- train(
+  Target ~ Age + Admission.Grade + GPA,
+  data = mod_df,
+  method = "rf",
+  trControl = kfold_control
+)
+
+print(rf_model_loocv)
+
+```
+
+Based on a 10-fold cross validation, we got an accuracy of 79% and a kappa value of 0.54. Our model performs very well. 
+
+The kappa value indicates that our model has a moderate level of agreement between the predicted and actual classes as well. 
+
+Based on all of these analyses and comparison of the two models, we can conclude that our random forest model is better than our multiple logistic regression model. 
+
+After the model analysis, we concluded that our logistic regression model was a more reliable model. But, based on the fact that both models performed significantly well in a variety of tests, we concluded that Age, Admission Grade, and GPA are the variables that seem to have the most influence on whether a student drops out or not. These were the common predictors between both models after pruning. 
+
+
+## Contributions
+
+**Based on the Table of Contents**
+
+* Khushi: Biggest Reasons Students Drop Out
+* Gabe: Data Cleaning and Manipulation, Target Variable, Student Age and Grades vs Dropout Rates
+* Tiffany: Research Questions, Scholarship Holders and Academic Performance
+* Vincent: Student Age and Grades vs Dropout Rates
+* Nicole: Previous Qualifications and Academic Performance
